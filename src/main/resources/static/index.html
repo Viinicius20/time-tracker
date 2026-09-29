@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Time Tracker</title>
+    <style>
+        :root { --bg:#1b1d21; --card:#25282e; --text:#e8e6e1; --muted:#9a9ca3; --ok:#5fb37c; --warn:#e0a84a; --over:#d95c5c; --line:#353941; }
+        * { box-sizing: border-box; }
+        body { margin:0; padding:24px 16px; background:var(--bg); color:var(--text); font:16px/1.5 system-ui, "Segoe UI", sans-serif; }
+        main { max-width:640px; margin:0 auto; }
+        h1 { font-size:1.4rem; margin:0 0 20px; }
+        .app { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:12px; }
+        .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+        .name { font-weight:600; }
+        .exe { color:var(--muted); font-size:.85rem; margin-left:6px; }
+        .live { color:var(--ok); font-size:.85rem; }
+        .bar { height:8px; background:var(--line); border-radius:4px; margin:10px 0 6px; overflow:hidden; }
+        .fill { height:100%; background:var(--ok); }
+        .fill.warn { background:var(--warn); }
+        .fill.over { background:var(--over); }
+        .row { display:flex; justify-content:space-between; align-items:center; color:var(--muted); font-size:.9rem; gap:8px; flex-wrap:wrap; }
+        button { background:transparent; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 10px; cursor:pointer; font:inherit; font-size:.85rem; }
+        button:hover { border-color:var(--muted); }
+        button:focus-visible, input:focus-visible { outline:2px solid var(--warn); outline-offset:2px; }
+        form { display:flex; gap:8px; flex-wrap:wrap; margin-top:24px; }
+        input { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px 10px; font:inherit; min-width:0; }
+        #name { flex:2 1 140px; } #exe { flex:2 1 140px; } #min { flex:1 1 90px; }
+        form button { padding:8px 16px; background:var(--text); color:var(--bg); border-color:var(--text); }
+        .empty, #err { color:var(--muted); }
+        #err { color:var(--over); margin-top:12px; min-height:1.5em; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Time Tracker</h1>
+    <div id="list"></div>
+
+    <form id="form">
+        <input id="name" placeholder="Nome (ex: Overwatch)" required>
+        <input id="exe" placeholder="Executável (ex: Overwatch.exe)" required>
+        <input id="min" type="number" min="1" placeholder="Minutos/dia" required>
+        <button type="submit">Adicionar</button>
+    </form>
+    <div id="err" role="alert"></div>
+</main>
+
+<script>
+    const API = '/api/apps';
+    const list = document.getElementById('list');
+    const err = document.getElementById('err');
+
+    const fmt = s => {
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+      return h ? `${h}h ${String(m).padStart(2, '0')}min` : `${m}min ${String(s % 60).padStart(2, '0')}s`;
+    };
+
+    async function call(url, opts) {
+      try {
+        const r = await fetch(url, opts);
+        if (!r.ok) throw new Error('Erro ' + r.status);
+        err.textContent = '';
+        return r;
+      } catch (e) {
+        err.textContent = 'Não consegui falar com o backend. Ele está rodando?';
+        throw e;
+      }
+    }
+
+    async function load() {
+      const apps = await (await call(API)).json();
+      if (!apps.length) {
+        list.innerHTML = '<p class="empty">Nenhum app cadastrado. Adicione um abaixo.</p>';
+        return;
+      }
+      list.innerHTML = apps.map(a => {
+        const pct = Math.min(100, a.limitSeconds ? a.usedSeconds / a.limitSeconds * 100 : 0);
+        const cls = pct >= 100 ? 'over' : pct >= 80 ? 'warn' : '';
+        return `<div class="app">
+          <div class="top">
+            <div><span class="name">${esc(a.name)}</span><span class="exe">${esc(a.exe)}</span></div>
+            ${a.running ? '<span class="live">em uso agora</span>' : ''}
+          </div>
+          <div class="bar"><div class="fill ${cls}" style="width:${pct}%"></div></div>
+          <div class="row">
+            <span>${fmt(a.usedSeconds)} de ${fmt(a.limitSeconds)}</span>
+            <span>
+              <button onclick="editLimit(${a.id}, ${a.limitSeconds})">Mudar limite</button>
+              <button onclick="removeApp(${a.id}, '${esc(a.name)}')">Remover</button>
+            </span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    async function editLimit(id, current) {
+      const v = prompt('Novo limite diário em minutos:', Math.round(current / 60));
+      if (!v || isNaN(v) || v <= 0) return;
+      await call(`${API}/${id}/limit`, {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({limitSeconds: Math.round(v * 60)})
+      });
+      load();
+    }
+
+    async function removeApp(id, name) {
+      if (!confirm(`Remover "${name}"?`)) return;
+      await call(`${API}/${id}`, {method: 'DELETE'});
+      load();
+    }
+
+    document.getElementById('form').addEventListener('submit', async e => {
+      e.preventDefault();
+      await call(API, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          name: document.getElementById('name').value,
+          exe: document.getElementById('exe').value,
+          limitSeconds: Math.round(document.getElementById('min').value * 60)
+        })
+      });
+      e.target.reset();
+      load();
+    });
+
+    load().catch(() => {});
+    setInterval(() => load().catch(() => {}), 2000);
+</script>
+</body>
+</html>
