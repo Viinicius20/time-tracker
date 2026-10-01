@@ -31,8 +31,12 @@ public class ForegroundWatcher {
     @Scheduled(fixedRate = 1000)
     @Transactional
     public void tick() {
-        if (!swept || !day.equals(LocalDate.now())) {   // primeira execução ou virou o dia
-            day = LocalDate.now();
+        tick(foregroundExe(), LocalDate.now());
+    }
+
+    void tick(String exe, LocalDate today) {
+        if (!swept || !day.equals(today)) {   // primeira execução ou virou o dia
+            day = today;
             repo.findAll().forEach(a -> {
                 if (!day.equals(a.usageDate)) {
                     a.usageDate = day;
@@ -41,7 +45,7 @@ public class ForegroundWatcher {
             });
             swept = true;
         }
-        currentExe = foregroundExe();
+        currentExe = exe;
         if (!currentExe.isEmpty()) {
             repo.findFirstByExeIgnoreCase(currentExe).ifPresent(a -> {
                 a.usedSeconds++;

@@ -47,6 +47,9 @@ public class TrackedAppController {
 
     @PutMapping("/{id}/limit")
     public AppView setLimit(@PathVariable Long id, @RequestBody NewLimit body) {
+        if (body.limitSeconds() <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "limitSeconds deve ser maior que zero");
+        }
         TrackedApp a = repo.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         a.limitSeconds = body.limitSeconds();
         return view(repo.save(a));
